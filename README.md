@@ -5,7 +5,7 @@
 
 
 ```
-bash <(curl -sL 'https://raw.githubusercontent.com/ypq123456789/RealityGo/refs/heads/main/RealityGo.sh')
+bash <(curl -sL 'https://raw.githubusercontent.com/Yeungchichao/RealityGo/main/RealityGo.sh')
 ```
 
 ## 主要功能

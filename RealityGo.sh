@@ -3,8 +3,13 @@
 SING_BOX_PATH="/etc/sing-box/"
 SERVICE_FILE_PATH='/etc/systemd/system/sing-box.service'
 SHARE_LINKS=""
-# 设置 sing-box 的监听端口。
-PORT=55639
+
+# --- 修改部分：生成随机端口 ---
+# 生成 10000 到 65535 之间的随机端口
+PORT=$(shuf -i 10000-65535 -n 1)
+echo "随机生成的监听端口为: $PORT"
+# ---------------------------
+
 SNI="global.fujifilm.com" # 你可以根据需要更改SNI
 
 # 全局变量存储IP信息, 国家/地区, 运营商, 服务器配置

@@ -1,128 +1,114 @@
+cat > /root/reality_fix.sh <<'EOF'
 #!/bin/bash
-
 SING_BOX_PATH="/etc/sing-box/"
 SERVICE_FILE_PATH='/etc/systemd/system/sing-box.service'
-SHARE_LINKS=""
-
-# --- 核心改进：环境检测与依赖前置 ---
-# 自动检测并安装最基础的 curl
-install_initial_dependencies() {
-    if ! command -v curl > /dev/null; then
-        echo "检测到缺失 curl，正在尝试安装..."
-        if command -v apt-get > /dev/null; then
-            apt-get update -qq && apt-get install -y curl -qq
-        elif command -v yum > /dev/null; then
-            yum install -y curl -q
-        elif command -v apk > /dev/null; then
-            apk add curl
-        fi
-    fi
-}
-
-# 生成 10000 到 65535 之间的随机端口
-PORT=$(shuf -i 10000-65535 -n 1)
 SNI="global.fujifilm.com"
 
-# 全局变量
-IPV4=""
-IPV6=""
-HAS_IPV4=0
-HAS_IPV6=0
-
-# 停止现有服务
-stop_singbox_if_running() {
-    if systemctl is-active --quiet sing-box || pgrep -x "sing-box" > /dev/null; then
-        echo "正在停止旧的 sing-box 服务..."
-        systemctl stop sing-box 2>/dev/null || service sing-box stop 2>/dev/null
-        sleep 1
-    fi
+# 1. 环境与架构检测
+os_check() {
+    if [[ -f /etc/redhat-release ]]; then OS_RELEASE="centos"
+    elif grep -Eqi "debian" /etc/issue /proc/version 2>/dev/null; then OS_RELEASE="debian"
+    elif grep -Eqi "ubuntu" /etc/issue /proc/version 2>/dev/null; then OS_RELEASE="ubuntu"
+    elif grep -Eqi "alpine" /etc/issue 2>/dev/null; then OS_RELEASE="alpine"
+    else OS_RELEASE="debian"; fi
+}
+arch_check() {
+    OS_ARCH=$(arch)
+    case $OS_ARCH in
+        x86_64|x64|amd64) OS_ARCH="amd64" ;;
+        aarch64|arm64) OS_ARCH="arm64" ;;
+        *) OS_ARCH="amd64" ;;
+    esac
 }
 
-# [此处省略原脚本中重复的 IP 获取、翻译、硬件检测函数，逻辑保持不变]
-# ... (中间函数 get_ip_addresses, fetch_ip_details, get_server_specs 等) ...
+# 2. 安装依赖并下载 sing-box
+install_and_download() {
+    echo "正在安装依赖并下载最新版 sing-box..."
+    if [[ "$OS_RELEASE" == "debian" || "$OS_RELEASE" == "ubuntu" ]]; then
+        apt-get update -qq && apt-get install -y curl wget jq openssl bc -qq
+    else
+        yum install -y curl wget jq openssl bc -q
+    fi
+    mkdir -p ${SING_BOX_PATH} && cd ${SING_BOX_PATH}
+    local latest_version=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep 'tag_name' | head -1 | awk -F '"' '{print $4}')
+    [ -z "$latest_version" ] && latest_version="v1.12.0"
+    local version_num=${latest_version#v}
+    wget -qO sing-box.tar.gz "https://github.com/SagerNet/sing-box/releases/download/${latest_version}/sing-box-${version_num}-linux-${OS_ARCH}.tar.gz"
+    tar -xzf sing-box.tar.gz --strip-components=1 && chmod +x sing-box && rm -f sing-box.tar.gz
+}
 
-# --- 重点改进：Systemd 服务安装 ---
-install_systemd_service() {
-    echo "正在安装/更新 systemd 服务..."
-    
-    # 清理旧的错误配置补丁（防止 214/SETSCHEDULER 报错残留）
-    rm -rf /etc/systemd/system/sing-box.service.d/priority.conf
-    
-    if [[ "$OS_RELEASE" == "alpine" ]]; then 
-        # Alpine OpenRC 配置保持原样
-        [...省略部分...]
-    else 
-        # 标准 Systemd 配置
-        cat > "$SERVICE_FILE_PATH" <<EOF
+# 3. 生成配置 (适配 1.12+ 域名策略)
+generate_config() {
+    PORT=$(shuf -i 10000-65535 -n 1)
+    UUID=$(./sing-box generate uuid)
+    KEYS=$(./sing-box generate reality-keypair)
+    PRIKEY=$(echo "$KEYS" | grep 'PrivateKey:' | awk '{print $2}')
+    PBK=$(echo "$KEYS" | grep 'PublicKey:' | awk '{print $2}')
+    SHORTID=$(openssl rand -hex 8)
+
+    cat > "${SING_BOX_PATH}config.json" <<EOD
+{
+  "log": {"level": "info", "timestamp": true},
+  "inbounds": [{
+    "type": "vless",
+    "tag": "vless-in",
+    "listen": "::",
+    "listen_port": $PORT,
+    "users": [{"uuid": "$UUID", "flow": "xtls-rprx-vision"}],
+    "tls": {
+      "enabled": true,
+      "server_name": "$SNI",
+      "reality": {
+        "enabled": true,
+        "handshake": {"server": "$SNI", "server_port": 443},
+        "private_key": "$PRIKEY",
+        "short_id": ["$SHORTID"]
+      }
+    }
+  }],
+  "outbounds": [{
+    "type": "direct",
+    "tag": "direct",
+    "domain_strategy": "ipv4_only"
+  }]
+}
+EOD
+    # 保存分享链接
+    IP=$(curl -s4m8 ip.sb || curl -s4m8 ifconfig.me)
+    echo "vless://$UUID@$IP:$PORT?security=reality&encryption=none&pbk=$PBK&headerType=none&fp=chrome&type=tcp&sni=$SNI&sid=$SHORTID&flow=xtls-rprx-vision#Reality-Node" > ${SING_BOX_PATH}share.txt
+}
+
+# 4. 安装 Systemd 服务 (彻底解决 214 报错)
+install_service() {
+    rm -rf /etc/systemd/system/sing-box.service.d/
+    cat > "$SERVICE_FILE_PATH" <<EOD
 [Unit]
 Description=sing-box Service
-Documentation=https://sing-box.sagernet.org/
-After=network.target nss-lookup.target
-Wants=network.target
-
+After=network.target
 [Service]
 Type=simple
 ExecStart=${SING_BOX_PATH}sing-box run -c ${SING_BOX_PATH}config.json
 Restart=on-failure
-RestartSec=10s
-LimitNPROC=10000
-LimitNOFILE=1000000
-
 [Install]
 WantedBy=multi-user.target
+EOD
+    systemctl daemon-reload
+    systemctl enable sing-box
+    systemctl restart sing-box
+    systemctl reset-failed
+}
+
+# 主执行逻辑
+os_check && arch_check
+install_and_download
+generate_config
+install_service
+
+echo -e "\n--- 安装成功 ---"
+echo "节点链接已保存至: ${SING_BOX_PATH}share.txt"
+cat ${SING_BOX_PATH}share.txt
+echo -e "\n服务状态:"
+systemctl status sing-box --no-pager
 EOF
-        chmod +x "$SERVICE_FILE_PATH"
 
-        # 智能检测：仅在 KVM/VMware 等非容器环境下开启高优先级调度
-        if systemd-detect-virt -q --container; then
-            echo "检测到容器环境 (LXC/OpenVZ)，跳过高优先级 CPU 调度设置以确保稳定。"
-        else
-            echo "检测到独立虚拟化环境，尝试开启 CPU 调度优化..."
-            mkdir -p /etc/systemd/system/sing-box.service.d
-            echo -e "[Service]\nCPUSchedulingPolicy=rr\nCPUSchedulingPriority=99" > /etc/systemd/system/sing-box.service.d/priority.conf
-        fi
-        
-        systemctl daemon-reload
-        systemctl enable sing-box
-    fi
-}
-
-# [此处省略原脚本中的下载、生成配置、分享链接函数，逻辑保持不变]
-# ... (中间函数 download_sing_box, generate_reality_config, gen_share_link 等) ...
-
-# --- 主流程入口 ---
-main() {
-    echo "开始执行 sing-box Reality 节点增强版脚本..."
-    install_initial_dependencies
-    stop_singbox_if_running
-    os_check
-    arch_check
-    install_base 
-    
-    get_ip_addresses 
-    if [[ $HAS_IPV4 -eq 1 ]]; then fetch_ip_details "$IPV4" "v4"; fi
-    if [[ $HAS_IPV6 -eq 1 ]]; then fetch_ip_details "$IPV6" "v6"; fi
-    get_server_specs 
-
-    download_sing_box 
-    
-    # 密钥生成逻辑
-    KEYS=$(${SING_BOX_PATH}sing-box generate reality-keypair)
-    PRIKEY=$(echo "$KEYS" | grep 'PrivateKey:' | awk '{print $2}') 
-    PBK=$(echo "$KEYS" | grep 'PublicKey:' | awk '{print $2}')    
-    UUID=$(${SING_BOX_PATH}sing-box generate uuid)
-    SHORTID=$(openssl rand -hex 8)
-
-    # 配置并安装服务
-    generate_reality_config "$PORT" "$UUID" "$PRIKEY" "$SHORTID" "$SNI"
-    install_systemd_service
-
-    # 启动与状态检查
-    systemctl restart sing-box 2>/dev/null || service sing-box restart 2>/dev/null
-    sleep 2
-    
-    # [后续展示链接及卸载提示逻辑保持不变]
-    # ...
-}
-
-main
+bash /root/reality_fix.sh

@@ -28,8 +28,8 @@ chmod +x $XRAY_BIN
 echo "生成 Reality 密钥..."
 for i in {1..5}; do
   KEYS=$($XRAY_BIN x25519 2>/dev/null)
-  PRIVATE=$(echo "$KEYS" | grep PrivateKey | awk '{print $2}')
-  PUBLIC=$(echo "$KEYS" | grep PublicKey | awk '{print $2}')
+PRIVATE=$(echo "$KEYS" | grep -i private | awk -F ': ' '{print $2}')
+PUBLIC=$(echo "$KEYS" | grep -i public | awk -F ': ' '{print $2}')
 
   if [[ -n "$PRIVATE" && -n "$PUBLIC" ]]; then
     break

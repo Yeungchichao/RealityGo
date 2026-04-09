@@ -8,7 +8,12 @@ bash <(curl -Ls https://raw.githubusercontent.com/XTLS/Xray-install/main/install
 # 生成参数
 PORT=$(shuf -i 20000-60000 -n 1)
 UUID=$(cat /proc/sys/kernel/random/uuid)
-KEYS=$(/usr/local/bin/xray x25519)
+KEYS=$(xray x25519 2>/dev/null)
+
+if [[ -z "$KEYS" ]]; then
+  KEYS=$(/usr/local/bin/xray x25519 2>/dev/null)
+fi
+
 PRIVATE=$(echo "$KEYS" | grep PrivateKey | awk '{print $2}')
 PUBLIC=$(echo "$KEYS" | grep PublicKey | awk '{print $2}')
 SHORTID=$(openssl rand -hex 4)

@@ -1,69 +1,92 @@
-# 1. 安装 Alpine 必备组件
-apk update && apk add curl wget jq openssl bc openrc
+#!/bin/bash
 
-# 2. 创建目录并下载适配 Alpine 的 sing-box
-mkdir -p /etc/sing-box/ && cd /etc/sing-box/
-LATEST=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | jq -r .tag_name)
-ARCH=$(arch | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-wget -O sing-box.tar.gz "https://github.com/SagerNet/sing-box/releases/download/${LATEST}/sing-box-${LATEST#v}-linux-${ARCH}.tar.gz"
-tar -xzf sing-box.tar.gz --strip-components=1 && chmod +x sing-box
+echo "=== 安装 VLESS Reality（全自动）==="
 
-# 3. 编写 Alpine 专用启动脚本 (OpenRC)
-cat > /etc/init.d/sing-box <<EOF
-#!/sbin/openrc-run
-name="sing-box"
-description="Sing-Box Service"
-supervisor="supervise-daemon"
-command="/etc/sing-box/sing-box"
-command_args="run -c /etc/sing-box/config.json"
-command_user="root:root"
+# 安装 Xray
+bash <(curl -Ls https://raw.githubusercontent.com/XTLS/Xray-install/main/install-release.sh)
 
-depend() {
-    after net dns
-    use net
-}
-EOF
-chmod +x /etc/init.d/sing-box
+# 生成参数
+PORT=$(shuf -i 20000-60000 -n 1)
+UUID=$(cat /proc/sys/kernel/random/uuid)
+KEYS=$(/usr/local/bin/xray x25519)
+PRIVATE=$(echo "$KEYS" | grep PrivateKey | awk '{print $2}')
+PUBLIC=$(echo "$KEYS" | grep PublicKey | awk '{print $2}')
+SHORTID=$(openssl rand -hex 4)
+IP=$(curl -s ifconfig.me)
 
-# 4. 重新生成配置 (适配 1.12+ 语法)
-PORT=$(shuf -i 10000-65535 -n 1)
-UUID=$(/etc/sing-box/sing-box generate uuid)
-KEYS=$(/etc/sing-box/sing-box generate reality-keypair)
-PRIKEY=$(echo "\$KEYS" | grep 'PrivateKey:' | awk '{print \$2}')
-PBK=$(echo "\$KEYS" | grep 'PublicKey:' | awk '{print \$2}')
-SHORTID=$(openssl rand -hex 8)
-
-cat > /etc/sing-box/config.json <<EOF
+# 写配置
+cat > /usr/local/etc/xray/config.json <<EOF
 {
-  "log": {"level": "info", "timestamp": true},
+  "log": { "loglevel": "warning" },
   "inbounds": [{
-    "type": "vless",
-    "tag": "vless-in",
-    "listen": "::",
-    "listen_port": $PORT,
-    "users": [{"uuid": "$UUID", "flow": "xtls-rprx-vision"}],
-    "tls": {
-      "enabled": true,
-      "server_name": "global.fujifilm.com",
-      "reality": {
-        "enabled": true,
-        "handshake": {"server": "global.fujifilm.com", "server_port": 443},
-        "private_key": "$PRIKEY",
-        "short_id": ["$SHORTID"]
+    "port": $PORT,
+    "protocol": "vless",
+    "settings": {
+      "clients": [{
+        "id": "$UUID",
+        "flow": "xtls-rprx-vision"
+      }],
+      "decryption": "none"
+    },
+    "streamSettings": {
+      "network": "tcp",
+      "security": "reality",
+      "realitySettings": {
+        "show": false,
+        "dest": "addons.mozilla.org:443",
+        "xver": 0,
+        "serverNames": ["addons.mozilla.org"],
+        "privateKey": "$PRIVATE",
+        "shortIds": ["$SHORTID"]
       }
     }
   }],
-  "outbounds": [{"type": "direct", "tag": "direct", "domain_strategy": "ipv4_only"}]
+  "outbounds": [{ "protocol": "freedom" }]
 }
 EOF
 
-# 5. 启动服务并设置开机自启
-rc-update add sing-box default
-rc-service sing-box restart
+# 启动
+systemctl daemon-reexec
+systemctl daemon-reload
+systemctl enable xray
+systemctl restart xray
 
-# 6. 生成并打印链接
-IP=$(curl -s4m8 ip.sb || curl -s4m8 ifconfig.me)
-echo -e "\n--- Alpine 专用节点链接 ---"
-echo "vless://$UUID@$IP:$PORT?security=reality&encryption=none&pbk=$PBK&headerType=none&fp=chrome&type=tcp&sni=global.fujifilm.com&sid=$SHORTID&flow=xtls-rprx-vision#Alpine-Reality"
-echo -e "\n服务状态:"
-rc-service sing-box status
+# 放行端口
+ufw allow $PORT 2>/dev/null
+
+# 输出信息
+echo ""
+echo "====== VLESS Reality 信息 ======"
+echo "IP: $IP"
+echo "端口: $PORT"
+echo "UUID: $UUID"
+echo "公钥: $PUBLIC"
+echo "shortId: $SHORTID"
+echo "SNI: addons.mozilla.org"
+
+echo ""
+echo "====== VLESS 链接 ======"
+echo "vless://$UUID@$IP:$PORT?encryption=none&flow=xtls-rprx-vision&security=reality&sni=addons.mozilla.org&fp=chrome&pbk=$PUBLIC&sid=$SHORTID&type=tcp#Reality"
+
+echo ""
+echo "====== Clash 配置 ======"
+cat <<EOC
+proxies:
+  - name: Reality
+    type: vless
+    server: $IP
+    port: $PORT
+    uuid: $UUID
+    network: tcp
+    tls: true
+    udp: true
+    flow: xtls-rprx-vision
+    servername: addons.mozilla.org
+    reality-opts:
+      public-key: $PUBLIC
+      short-id: $SHORTID
+    client-fingerprint: chrome
+EOC
+
+echo ""
+echo "=== 完成 🚀 ==="

@@ -59,46 +59,34 @@ bash <(curl -sL 'https://raw.githubusercontent.com/Yeungchichao/RealityGo/main/R
 
 ## 卸载方法
 
-脚本会在执行结束时提示卸载命令。通常包括：
+1. 使用官方脚本卸载 (推荐)
+如果您是使用 f_v2ray 或官方提供的 install-release.sh 安装的，可以直接运行：
 
-1.  **停止并禁用服务**:
-    * 对于 systemd 系统 (Debian, Ubuntu, CentOS):
-        ```bash
-        sudo systemctl stop sing-box
-        sudo systemctl disable sing-box
-        ```
-    * 对于 Alpine Linux (OpenRC):
-        ```bash
-        sudo service sing-box stop
-        sudo rc-update delete sing-box default
-        ```
+Bash
+bash <(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh) --remove
+2. 手动彻底卸载
+如果您不确定安装方式，可以通过以下步骤手动停止服务并删除文件：
 
-2.  **删除文件**:
-    ```bash
-    sudo rm -rf ${SING_BOX_PATH} # 默认为 /etc/sing-box/
-    sudo rm -f ${SERVICE_FILE_PATH} # 默认为 /etc/systemd/system/sing-box.service (非Alpine)
-    # 如果是 Alpine，服务文件路径是 /etc/init.d/sing-box
-    # sudo rm -f /etc/init.d/sing-box
-    sudo rm -f /etc/systemd/system/sing-box.service.d/priority.conf # (非Alpine)
-    ```
+第一步：停止并禁用服务
 
-## 脚本依赖
+Bash
+systemctl stop xray
+systemctl disable xray
+第二步：删除二进制文件和配置文件
 
-脚本会自动尝试安装以下依赖包：
+Bash
+# 删除主程序和资源文件
+rm -rf /usr/local/bin/xray
+rm -rf /usr/local/share/xray
 
-* `wget`: 用于下载文件。
-* `tar`: 用于解压归档文件。
-* `jq`: 用于处理 JSON 数据 (获取 IP 详情)。
-* `openssl`: 用于生成 Short ID。
-* `curl`: 用于从 API 获取 IP 地址和地理位置信息。
-* `bc`: 用于进行浮点数运算 (计算内存大小)。
+# 删除配置文件目录
+rm -rf /usr/local/etc/xray
 
-如果您的系统最小化安装，请确保这些工具可以通过包管理器安装。
+# 删除日志文件
+rm -rf /var/log/xray
+第三步：移除 Systemd 服务项
 
-## 贡献
-
-欢迎提交 Issue 和 Pull Request 来改进此脚本。
-
-## 免责声明
-
-此脚本按“原样”提供，不作任何明示或暗示的保证。使用此脚本的风险由您自行承担。请确保您的使用符合当地法律法规以及服务提供商的政策。
+Bash
+rm -f /etc/systemd/system/xray.service
+rm -f /etc/systemd/system/xray@.service
+systemctl daemon-reload

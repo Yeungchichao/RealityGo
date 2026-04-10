@@ -64,6 +64,7 @@ bash <(curl -sL 'https://raw.githubusercontent.com/Yeungchichao/RealityGo/main/R
 
 Bash
 bash <(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh) --remove
+
 2. 手动彻底卸载
 如果您不确定安装方式，可以通过以下步骤手动停止服务并删除文件：
 
@@ -76,13 +77,16 @@ systemctl disable xray
 
 Bash
 # 删除主程序和资源文件
+
 rm -rf /usr/local/bin/xray
 rm -rf /usr/local/share/xray
 
 # 删除配置文件目录
+
 rm -rf /usr/local/etc/xray
 
 # 删除日志文件
+
 rm -rf /var/log/xray
 第三步：移除 Systemd 服务项
 

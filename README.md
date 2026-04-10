@@ -71,14 +71,19 @@ bash <(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)
 第一步：停止并禁用服务
 
 Bash
+
 systemctl stop xray
+
 systemctl disable xray
+
 第二步：删除二进制文件和配置文件
 
 Bash
+
 # 删除主程序和资源文件
 
 rm -rf /usr/local/bin/xray
+
 rm -rf /usr/local/share/xray
 
 # 删除配置文件目录
@@ -88,9 +93,13 @@ rm -rf /usr/local/etc/xray
 # 删除日志文件
 
 rm -rf /var/log/xray
+
 第三步：移除 Systemd 服务项
 
 Bash
+
 rm -f /etc/systemd/system/xray.service
+
 rm -f /etc/systemd/system/xray@.service
+
 systemctl daemon-reload

@@ -30,7 +30,7 @@ PORT=$(shuf -i 20000-60000 -n 1)
 UUID=$(cat /proc/sys/kernel/random/uuid)
 SHORTID=$(openssl rand -hex 4)
 IP=$(curl -s ifconfig.me)
-SNI="www.microsoft.com"
+SNI="addons.mozilla.org"
 
 # 4. 写入 JSON 配置文件
 mkdir -p /usr/local/etc/xray

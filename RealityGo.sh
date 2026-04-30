@@ -1,3 +1,8 @@
+# 更新软件包列表
+sudo apt update
+
+# 手动安装 unzip
+sudo apt install -y unzip
 #!/bin/bash
 
 echo "=== VLESS Reality 自动化部署 (适配你的特定版本) ==="

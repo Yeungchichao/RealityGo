@@ -35,7 +35,8 @@ PORT=$(shuf -i 20000-60000 -n 1)
 UUID=$(cat /proc/sys/kernel/random/uuid)
 SHORTID=$(openssl rand -hex 4)
 IP=$(curl -s ifconfig.me)
-SNI="addons.mozilla.org"
+#SNI="addons.mozilla.org"
+SNI="global.fujifilm.com"
 
 # 4. 写入 JSON 配置文件
 mkdir -p /usr/local/etc/xray

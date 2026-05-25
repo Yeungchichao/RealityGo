@@ -1,11 +1,18 @@
-# 更新软件包列表
-sudo apt update
-
-# 手动安装 unzip
-sudo apt install -y unzip
 #!/bin/bash
 
-echo "=== VLESS Reality 自动化部署 (适配你的特定版本) ==="
+# 确保脚本以 root 权限运行
+if [ "$EUID" -ne 0 ]; then
+    echo "❌ 请使用 root 权限运行此脚本！"
+    exit 1
+fi
+
+echo "=== VLESS Reality 自动化部署 (全量支持自定义 SNI) ==="
+
+# 0. 自动安装依赖
+echo "正在检查并安装基础依赖..."
+if ! command -v unzip &> /dev/null; then
+    apt update && apt install -y unzip curl openssl
+fi
 
 # 1. 基础环境
 XRAY_BIN="/usr/local/bin/xray"
@@ -14,31 +21,103 @@ if [ ! -f "$XRAY_BIN" ]; then
     bash <(curl -Ls https://raw.githubusercontent.com/XTLS/Xray-install/main/install-release.sh)
 fi
 
-# 2. 核心：适配你的输出格式提取密钥
+# 2. 交互式选择 SNI (伪装域名)
+echo "--------------------------------"
+echo "请选择你要使用的 SNI 伪装域名："
+echo "--------------------------------"
+
+# 整合你提供的所有域名列表
+SNI_OPTIONS=(
+    "gateway.icloud.com"
+    "itunes.apple.com"
+    "swdist.apple.com"
+    "swcdn.apple.com"
+    "updates.cdn-apple.com"
+    "mensura.cdn-apple.com"
+    "osxapps.itunes.apple.com"
+    "aod.itunes.apple.com"
+    "download-installer.cdn.mozilla.net"
+    "addons.mozilla.org"
+    "images-na.ssl-images-amazon.com"
+    "m.media-amazon.com"
+    "www.lovelive-anime.jp"
+    "academy.nvidia.com"
+    "software.download.prss.microsoft.com"
+    "www.python.org"
+    "vuejs.org"
+    "vuejs-jp.org"
+    "zh-hk.vuejs.org"
+    "react.dev"
+    "www.java.com"
+    "www.oracle.com"
+    "www.mysql.com"
+    "www.mongodb.com"
+    "redis.io"
+    "www.swift.com"
+    "www.cisco.com"
+    "www.asus.com"
+    "www.samsung.com"
+    "www.amd.com"
+    "www.umcg.nl"
+    "www.fom-international.com"
+    "www.u-can.co.jp"
+    "github.io"
+    "自定义输入"
+)
+
+# 使用 COLUMNS 变量让菜单在大屏幕上更美观（多列显示）
+export COLUMNS=80
+
+PS3="请输入选项数字 [1-${#SNI_OPTIONS[@]}]: "
+select opt in "${SNI_OPTIONS[@]}"; do
+    case $opt in
+        "自定义输入")
+            read -p "请输入你自己的 SNI 域名: " SNI
+            if [ -z "$SNI" ]; then
+                echo "输入不能为空，默认使用 gateway.icloud.com"
+                SNI="gateway.icloud.com"
+            fi
+            break
+            ;;
+        *)
+            if [ -n "$opt" ]; then
+                SNI=$opt
+                break
+            else
+                echo "⚠️ 输入错误，请输入有效的数字！"
+            fi
+            ;;
+    esac
+done
+
+echo "--------------------------------"
+echo "🎯 已选择 SNI: $SNI"
+echo "--------------------------------"
+
+# 3. 核心：自适应提取密钥
 echo "正在提取密钥..."
 KEYS_OUT=$($XRAY_BIN x25519 2>/dev/null)
-
-# 适配 PrivateKey:
-PRIVATE=$(echo "$KEYS_OUT" | grep "PrivateKey" | awk '{print $2}')
-
-# 适配 Password (PublicKey):
-# 这里直接提取该行最后一个空格后的内容
-PUBLIC=$(echo "$KEYS_OUT" | grep "PublicKey" | awk '{print $NF}')
+PRIVATE=$(echo "$KEYS_OUT" | grep -i "Private" | awk '{print $NF}')
+PUBLIC=$(echo "$KEYS_OUT" | grep -i "Public" | awk '{print $NF}')
 
 if [[ -z "$PRIVATE" || -z "$PUBLIC" ]]; then
-    echo "❌ 提取失败，请检查输出格式。"
+    echo "❌ 密钥提取失败，请检查 Xray 是否正常安装。"
     exit 1
 fi
 
-# 3. 自动配置参数
+# 4. 自动配置参数
 PORT=$(shuf -i 20000-60000 -n 1)
 UUID=$(cat /proc/sys/kernel/random/uuid)
 SHORTID=$(openssl rand -hex 4)
-IP=$(curl -s ifconfig.me)
-SNI="addons.mozilla.org"
-#SNI="global.fujifilm.com"
 
-# 4. 写入 JSON 配置文件
+echo "正在获取公网 IP..."
+IP=$(curl -s --max-time 5 ifconfig.me || curl -s --max-time 5 api.ipify.org || curl -s --max-time 5 ip.sb)
+if [ -z "$IP" ]; then
+    echo "⚠️ 无法自动获取公网 IP，请手动替换链接中的 IP 地址。"
+    IP="YOUR_SERVER_IP"
+fi
+
+# 5. 写入 JSON 配置文件
 mkdir -p /usr/local/etc/xray
 cat > /usr/local/etc/xray/config.json <<EOF
 {
@@ -70,15 +149,16 @@ cat > /usr/local/etc/xray/config.json <<EOF
 }
 EOF
 
-# 5. 权限与服务启动
+# 6. 权限与服务启动
 SERVICE_FILE="/etc/systemd/system/xray.service"
 if [ -f "$SERVICE_FILE" ]; then
     sed -i 's/User=nobody/User=root/g' $SERVICE_FILE
     systemctl daemon-reload
 fi
-systemctl enable xray --now
+systemctl enable xray --now &>/dev/null
 systemctl restart xray
 
+# 7. 打印结果
 echo ""
 echo "✅ 部署成功！"
 echo "--------------------------------"
@@ -89,5 +169,5 @@ echo "公钥(Pbk): $PUBLIC"
 echo "shortId(Sid): $SHORTID"
 echo "SNI: $SNI"
 echo "--------------------------------"
-echo "VLESS 链接:"
-echo "vless://$UUID@$IP:$PORT?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$SNI&fp=chrome&pbk=$PUBLIC&sid=$SHORTID&type=tcp#Reality_SelfUse"
+echo "VLESS 链接 (可直接复制到客户端):"
+echo "vless://$UUID@$IP:$PORT?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$SNI&fp=chrome&pbk=$PUBLIC&sid=$SHORTID&type=tcp#Reality_$SNI"

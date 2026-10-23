@@ -2,10 +2,13 @@
 set -Eeuo pipefail
 
 # Debian/Ubuntu：使用 sing-box 部署 VLESS + REALITY
+# 独立配置目录可避免与 /etc/sing-box 中已有配置片段合并后出现重复 tag。
 # 运行：sudo bash deploy_singbox_reality.sh
 SB_BIN="/usr/bin/sing-box"
-CONFIG_DIR="/etc/sing-box"
+CONFIG_DIR="/etc/sing-box-reality"
 CONFIG_FILE="$CONFIG_DIR/config.json"
+UNIT_DROPIN_DIR="/etc/systemd/system/sing-box.service.d"
+UNIT_DROPIN="$UNIT_DROPIN_DIR/10-reality.conf"
 
 fail() { echo "❌ $*" >&2; exit 1; }
 need_cmd() { command -v "$1" >/dev/null 2>&1 || fail "缺少命令：$1"; }
@@ -72,7 +75,6 @@ done
 [[ "$SNI" =~ ^[A-Za-z0-9.-]+$ ]] || fail "域名格式不合法：$SNI"
 [[ "$SNI" != .* && "$SNI" != *. && "$SNI" != *..* ]] || fail "域名格式不合法：$SNI"
 
-# Reality handshake 目标检查
 if ! curl -sSIL --max-time 8 "https://${SNI}/" >/dev/null; then
   echo "⚠️ 服务器无法通过 HTTPS 访问 https://${SNI}/ 。"
   read -r -p "仍然继续？[y/N] " CONTINUE
@@ -110,10 +112,11 @@ if [[ -z "$IP" ]]; then
 fi
 [[ -n "$IP" ]] || fail "服务器公网 IP/域名不能为空。"
 
-# 临时 JSON 文件必须以 .json 结尾，先校验，再替换正式配置
+# 使用独立配置目录，不读取 /etc/sing-box 下的旧配置片段
 install -d -o root -g "$SB_GROUP" -m 750 "$CONFIG_DIR"
 TMP_CONFIG=$(mktemp "$CONFIG_DIR/config.XXXXXX.json")
 BACKUP=""
+DROPIN_BACKUP=""
 cleanup() { rm -f "${TMP_CONFIG:-}"; }
 trap cleanup EXIT
 cat >"$TMP_CONFIG" <<EOF
@@ -160,44 +163,55 @@ chown root:"$SB_GROUP" "$TMP_CONFIG"
 chmod 640 "$TMP_CONFIG"
 "$SB_BIN" check -c "$TMP_CONFIG" || fail "sing-box 配置校验失败；现有配置尚未被覆盖。"
 
+# 备份本脚本管理的配置和可能存在的同名 systemd 覆盖
 if [[ -f "$CONFIG_FILE" ]]; then
   BACKUP="${CONFIG_FILE}.bak.$(date +%Y%m%d%H%M%S)"
   cp -a "$CONFIG_FILE" "$BACKUP"
 fi
 install -o root -g "$SB_GROUP" -m 640 "$TMP_CONFIG" "$CONFIG_FILE"
+install -d -m 0755 "$UNIT_DROPIN_DIR"
+if [[ -f "$UNIT_DROPIN" ]]; then
+  DROPIN_BACKUP="${UNIT_DROPIN}.bak.$(date +%Y%m%d%H%M%S)"
+  cp -a "$UNIT_DROPIN" "$DROPIN_BACKUP"
+fi
 
+# 覆盖发行包默认 ExecStart，明确只读取单一 JSON 文件，不合并配置目录
+cat >"$UNIT_DROPIN" <<EOF
+[Service]
+ExecStart=
+ExecStart=$SB_BIN run -c $CONFIG_FILE
+EOF
+chmod 644 "$UNIT_DROPIN"
 systemctl daemon-reload
 systemctl enable sing-box.service >/dev/null
+
+if ! runuser -u "$SB_USER" -- "$SB_BIN" check -c "$CONFIG_FILE"; then
+  echo "❌ 服务用户无法读取或校验独立配置：" >&2
+  namei -l "$CONFIG_FILE" >&2 || true
+  fail "独立配置校验失败。"
+fi
+
 if ! systemctl restart sing-box.service; then
   echo "❌ sing-box 启动失败，最近日志：" >&2
   journalctl -u sing-box.service -n 80 --no-pager >&2 || true
   if [[ -n "$BACKUP" ]]; then
     cp -a "$BACKUP" "$CONFIG_FILE"
-    systemctl restart sing-box.service || true
-    echo "已尝试恢复旧配置：$BACKUP" >&2
+    echo "已保留旧配置备份：$BACKUP" >&2
   fi
-  fail "sing-box 服务启动失败。"
+  if [[ -n "$DROPIN_BACKUP" ]]; then
+    cp -a "$DROPIN_BACKUP" "$UNIT_DROPIN"
+  fi
+  systemctl daemon-reload
+  systemctl restart sing-box.service || true
+  fail "服务启动失败。独立配置文件：$CONFIG_FILE；请查看上方日志。"
 fi
 sleep 2
 if ! systemctl is-active --quiet sing-box.service; then
   journalctl -u sing-box.service -n 80 --no-pager >&2 || true
-  if [[ -n "$BACKUP" ]]; then
-    cp -a "$BACKUP" "$CONFIG_FILE"
-    systemctl restart sing-box.service || true
-    echo "已尝试恢复旧配置：$BACKUP" >&2
-  fi
   fail "sing-box 服务未处于 active 状态。"
 fi
 
-# 用服务身份复核配置读取与解析
-if ! runuser -u "$SB_USER" -- "$SB_BIN" check -c "$CONFIG_FILE"; then
-  echo "❌ 服务用户无法读取或校验正式配置：" >&2
-  namei -l "$CONFIG_FILE" >&2 || true
-  journalctl -u sing-box.service -n 60 --no-pager >&2 || true
-  fail "正式配置校验失败。"
-fi
-
-# 本机 UFW 放行；云安全组需要用户在云控制台单独放行
+# 本机 UFW 放行；云安全组仍需在云控制台单独放行
 if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
   ufw allow "${PORT}/tcp" || echo "⚠️ UFW 放行失败，请手动放行 TCP $PORT。" >&2
 fi
@@ -208,11 +222,11 @@ else
   fail "服务 active 但端口 $PORT 未监听。"
 fi
 
-# VLESS 分享链接；客户端需支持 REALITY 和 Vision
 LINK="vless://${UUID}@${IP}:${PORT}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${SNI}&fp=chrome&pbk=${PUBLIC}&sid=${SHORTID}&type=tcp#sing-box-Reality_${SNI}"
 echo
-echo "✅ sing-box 部署完成：配置检查通过、服务 active、TCP 端口本机监听。"
-echo "注意：请在云厂商安全组/网络 ACL 放行入站 TCP $PORT。此脚本不能从服务器验证公网入站可达性。"
+echo "✅ sing-box 部署完成：独立配置校验通过、服务 active、TCP 端口本机监听。"
+echo "配置目录：$CONFIG_DIR（systemd 已设置为只读取该目录下的单一 config.json）"
+echo "注意：请在云厂商安全组/网络 ACL 放行入站 TCP $PORT。本机监听不代表公网可达。"
 echo "--------------------------------"
 echo "服务器地址: $IP"
 echo "端口: $PORT/TCP"
@@ -223,6 +237,7 @@ echo "SNI: $SNI"
 echo "配置文件: $CONFIG_FILE"
 echo "服务运行身份: ${SB_USER}:${SB_GROUP}"
 [[ -n "$BACKUP" ]] && echo "旧配置备份: $BACKUP"
+[[ -n "$DROPIN_BACKUP" ]] && echo "旧 systemd 覆盖备份: $DROPIN_BACKUP"
 echo "--------------------------------"
 echo "VLESS 链接（含访问凭据，请勿公开）:"
 echo "$LINK"

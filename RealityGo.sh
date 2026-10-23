@@ -24,11 +24,47 @@ getent group sing-box >/dev/null 2>&1 || groupadd --system sing-box
 curl -fsSL https://sing-box.app/install.sh | sh
 command -v sing-box >/dev/null 2>&1 || { echo "sing-box 安装失败。" >&2; exit 1; }
 
-# 所有可随机的连接参数均随机生成。Reality 伪装目标必须是可用的真实 TLS 站点，
-# 因此从候选公开域名中随机选择，而不是使用不存在的随机域名。
+# Reality 的 SNI 同时作为服务端握手目标；允许从候选列表手动选择，
+# 直接回车则随机选择。SNI_CHOICE=编号 可用于非交互部署。
+SNI_OPTIONS=(
+  "gateway.icloud.com" "itunes.apple.com" "swdist.apple.com"
+  "swcdn.apple.com" "updates.cdn-apple.com" "mensura.cdn-apple.com"
+  "osxapps.itunes.apple.com" "aod.itunes.apple.com" "learn.microsoft.com"
+  "addons.mozilla.org" "global.fujifilm.com" "m.media-amazon.com"
+  "www.lovelive-anime.jp" "academy.nvidia.com" "www.tesla.com"
+  "www.python.org" "vuejs.org" "vuejs-jp.org" "zh-hk.vuejs.org"
+  "react.dev" "www.java.com" "www.oracle.com" "www.mysql.com"
+  "www.mongodb.com" "redis.io" "www.swift.com" "www.cisco.com"
+  "www.asus.com" "www.samsung.com" "www.amd.com" "www.umcg.nl"
+  "www.fom-international.com" "www.u-can.co.jp" "github.io"
+)
+
+SNI_CHOICE="${SNI_CHOICE:-}"
+if [[ -z "$SNI_CHOICE" && -t 0 ]]; then
+  echo "请选择 Reality SNI（伪装域名）："
+  for i in "${!SNI_OPTIONS[@]}"; do
+    printf '  %2d) %s\n' "$((i + 1))" "${SNI_OPTIONS[$i]}"
+  done
+  read -r -p "输入编号；直接回车随机选择：" SNI_CHOICE
+fi
+if [[ -z "$SNI_CHOICE" ]]; then
+  SNI_INDEX="$(shuf -i 0-$((${#SNI_OPTIONS[@]} - 1)) -n 1)"
+elif [[ "$SNI_CHOICE" =~ ^[0-9]+$ ]] && (( SNI_CHOICE >= 1 && SNI_CHOICE <= ${#SNI_OPTIONS[@]} )); then
+  SNI_INDEX="$((SNI_CHOICE - 1))"
+else
+  echo "SNI_CHOICE 必须是 1 到 ${#SNI_OPTIONS[@]} 的编号。" >&2
+  exit 1
+fi
+TARGET="${SNI_OPTIONS[$SNI_INDEX]}"
+echo "已选择 SNI：${TARGET}；正在检查服务器能否连接其 TLS 1.3 服务……"
+if ! timeout 10 openssl s_client -connect "${TARGET}:443" -servername "$TARGET" -tls1_3 -brief </dev/null >/dev/null 2>&1; then
+  echo "无法与 ${TARGET}:443 完成 TLS 1.3 握手。请重跑并选择其他 SNI 编号。" >&2
+  exit 1
+fi
+
+# 端口、UUID 和密钥随机生成；short_id 遵守 Reality 最多 8 位的限制。
 PORT="$(shuf -i 20000-55000 -n 1)"
 UUID="$(cat /proc/sys/kernel/random/uuid)"
-TARGET="$(printf '%s\n' www.microsoft.com www.apple.com www.samsung.com www.adobe.com www.amazon.com | shuf -n 1)"
 # sing-box Reality short_id 最多 8 个十六进制字符；4 随机字节正好 8 位。
 SHORT_ID="$(openssl rand -hex 4)"
 KEY_OUTPUT="$(sing-box generate reality-keypair)"

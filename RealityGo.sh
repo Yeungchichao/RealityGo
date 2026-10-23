@@ -191,6 +191,47 @@ if ! runuser -u "$SB_USER" -- "$SB_BIN" check -c "$CONFIG_FILE"; then
   fail "独立配置校验失败。"
 fi
 
+# 从最终配置实际派生 REALITY 公钥，避免客户端 pbk 与服务端私钥不匹配
+REALITY_INFO=$(python3 - "$CONFIG_FILE" <<'PY'
+import base64, json, subprocess, sys
+
+with open(sys.argv[1], encoding="utf-8") as f:
+    config = json.load(f)
+matches = [item for item in config.get("inbounds", []) if item.get("tag") == "vless-reality-in"]
+if len(matches) != 1:
+    raise SystemExit("配置中 vless-reality-in 数量不是 1")
+reality = matches[0]["tls"]["reality"]
+server = reality["handshake"]["server"]
+short_ids = reality.get("short_id", [])
+if isinstance(short_ids, str):
+    short_ids = [short_ids]
+private = reality["private_key"]
+raw = base64.urlsafe_b64decode(private + "=" * (-len(private) % 4))
+if len(raw) != 32:
+    raise SystemExit("REALITY 私钥解码长度不是 32 字节")
+der = bytes.fromhex("302e020100300506032b656e04220420") + raw
+result = subprocess.run(
+    ["openssl", "pkey", "-inform", "DER", "-in", "/dev/stdin", "-pubout", "-outform", "DER"],
+    input=der, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True
+)
+public = base64.urlsafe_b64encode(result.stdout[-32:]).decode().rstrip("=")
+print(server)
+print(",".join(short_ids))
+print(public)
+PY
+) || fail "无法从最终配置读取并派生 REALITY 参数。"
+mapfile -t REALITY_LINES <<<"$REALITY_INFO"
+CONFIG_SNI="${REALITY_LINES[0]:-}"
+CONFIG_SHORTIDS="${REALITY_LINES[1]:-}"
+CONFIG_PUBLIC="${REALITY_LINES[2]:-}"
+[[ "$CONFIG_SNI" == "$SNI" ]] || fail "配置中的 handshake.server 与所选 SNI 不一致。"
+[[ ",${CONFIG_SHORTIDS}," == *",${SHORTID},"* ]] || fail "配置中的 short_id 与生成值不一致。"
+[[ "$CONFIG_PUBLIC" == "$PUBLIC" ]] || fail "由最终配置私钥派生的公钥与生成公钥不一致。"
+echo "✅ REALITY 参数回读校验通过。"
+echo "客户端 server_name/SNI: $CONFIG_SNI"
+echo "客户端 short_id/sid: $SHORTID"
+echo "客户端 public_key/pbk: $CONFIG_PUBLIC"
+
 if ! systemctl restart sing-box.service; then
   echo "❌ sing-box 启动失败，最近日志：" >&2
   journalctl -u sing-box.service -n 80 --no-pager >&2 || true
@@ -222,7 +263,7 @@ else
   fail "服务 active 但端口 $PORT 未监听。"
 fi
 
-LINK="vless://${UUID}@${IP}:${PORT}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${SNI}&fp=chrome&pbk=${PUBLIC}&sid=${SHORTID}&type=tcp#sing-box-Reality_${SNI}"
+LINK="vless://${UUID}@${IP}:${PORT}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${CONFIG_SNI}&fp=chrome&pbk=${CONFIG_PUBLIC}&sid=${SHORTID}&type=tcp#sing-box-Reality_${CONFIG_SNI}"
 echo
 echo "✅ sing-box 部署完成：独立配置校验通过、服务 active、TCP 端口本机监听。"
 echo "配置目录：$CONFIG_DIR（systemd 已设置为只读取该目录下的单一 config.json）"

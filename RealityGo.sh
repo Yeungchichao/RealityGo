@@ -20,6 +20,23 @@ apt-get update -y
 apt-get install -y ca-certificates curl jq openssl
 getent group sing-box >/dev/null 2>&1 || groupadd --system sing-box
 
+# 启用 TCP BBR 与 fq；若当前内核不提供 BBR，则明确提示并继续安装代理。
+modprobe tcp_bbr 2>/dev/null || true
+if sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null | tr ' ' '\n' | grep -qx bbr; then
+  cat >/etc/sysctl.d/99-singbox-bbr-fq.conf <<'SYSCTL'
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+SYSCTL
+  sysctl -p /etc/sysctl.d/99-singbox-bbr-fq.conf >/dev/null
+  if [[ "$(sysctl -n net.ipv4.tcp_congestion_control)" == "bbr" && "$(sysctl -n net.core.default_qdisc)" == "fq" ]]; then
+    echo "TCP BBR 与 fq 已启用并写入持久化配置。"
+  else
+    echo "警告：已写入 BBR/fq 配置，但内核未能应用；请检查内核支持。" >&2
+  fi
+else
+  echo "警告：当前内核未提供 BBR，跳过 BBR/fq 设置；sing-box 安装继续。" >&2
+fi
+
 # 官方手动安装脚本（Debian/Ubuntu 会安装对应的软件包并提供 systemd 服务）
 curl -fsSL https://sing-box.app/install.sh | sh
 command -v sing-box >/dev/null 2>&1 || { echo "sing-box 安装失败。" >&2; exit 1; }

@@ -30,7 +30,7 @@ need_cmd install
 # 安装 Xray
 if [[ ! -x "$XRAY_BIN" ]]; then
   echo "正在安装 Xray..."
-  bash <(curl -fsSL https://raw.githubusercontent.com/XTLS/Xray-install/main/install-release.sh )
+  bash <(curl -fsSL https://raw.githubusercontent.com/XTLS/Xray-install/main/install-release.sh)
 fi
 [[ -x "$XRAY_BIN" ]] || fail "Xray 未安装成功：$XRAY_BIN 不存在或不可执行。"
 
@@ -73,7 +73,7 @@ done
 
 # 检查目标站点从本机是否可达；用户确认后可继续
 if ! curl -sSIL --max-time 8 "https://${SNI}/" >/dev/null; then
-  echo "⚠️ 服务器无法通过 HTTPS 访问 https://${SNI}/ ，该目标可能不可达。"
+  echo "⚠️ 服务器无法通过 HTTPS 访问 https://${SNI}/，该目标可能不可达。"
   read -r -p "仍继续？[y/N] " CONTINUE
   [[ "$CONTINUE" =~ ^[Yy]$ ]] || fail "已取消，请选择服务器可访问的目标。"
 fi
@@ -98,9 +98,10 @@ if [[ -z "$IP" ]]; then
 fi
 [[ -n "$IP" ]] || fail "服务器公网 IP/域名不能为空。"
 
-# 准备目录。目录允许服务组遍历，配置文件仅服务用户/组可读。
+# 准备目录。临时文件也必须以 .json 结尾，否则 Xray 可能无法识别格式。
+# 目录允许服务组遍历，配置文件仅服务用户/组可读。
 install -d -o root -g "$XRAY_GROUP" -m 750 "$CONFIG_DIR"
-TMP_CONFIG=$(mktemp "$CONFIG_DIR/config.json.XXXXXX")
+TMP_CONFIG=$(mktemp "$CONFIG_DIR/config.XXXXXX.json")
 BACKUP=""
 cleanup() { rm -f "${TMP_CONFIG:-}"; }
 trap cleanup EXIT

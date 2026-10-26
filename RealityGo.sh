@@ -37,8 +37,17 @@ else
   echo "警告：当前内核未提供 BBR，跳过 BBR/fq 设置；sing-box 安装继续。" >&2
 fi
 
-# 官方手动安装脚本（Debian/Ubuntu 会安装对应的软件包并提供 systemd 服务）
-curl -fsSL https://sing-box.app/install.sh | sh
+# 从 GitHub Releases API 获取 latest 稳定版（排除 alpha/beta/rc 预发布）
+LATEST_TAG="$(curl -fsSL --retry 3 https://api.github.com/repos/SagerNet/sing-box/releases/latest | jq -er '.tag_name')"
+LATEST_VERSION="${LATEST_TAG#v}"
+if [[ ! "$LATEST_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+  echo "无法识别 GitHub 返回的 sing-box 版本标签：$LATEST_TAG" >&2
+  exit 1
+fi
+echo "将安装 sing-box 最新稳定版：${LATEST_TAG}"
+
+# 官方安装脚本安装指定版本；版本号由上方 API 请求动态获取
+curl -fsSL --retry 3 https://sing-box.app/install.sh | sh -s -- --version "$LATEST_VERSION"
 command -v sing-box >/dev/null 2>&1 || { echo "sing-box 安装失败。" >&2; exit 1; }
 
 # Reality 的 SNI 同时作为服务端握手目标；允许从候选列表手动选择，

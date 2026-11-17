@@ -1,7 +1,7 @@
 # RealityGo-Reality一键部署脚本
 
 这是一个用于在 Linux 服务器上自动安装和配置 [Sing-Box](https://sing-box.sagernet.org/) 作为 Reality 代理服务器的 Bash 脚本。脚本会自动检测服务器信息，生成配置文件和分享链接，并设置 systemd (或 Alpine Linux 的 OpenRC) 服务。
-## 使用方法
+## 安装
 
 
 ```
@@ -59,46 +59,12 @@ bash <(curl -sL 'https://raw.githubusercontent.com/Yeungchichao/RealityGo/main/R
 
 ## 卸载方法
 
-1. 使用官方脚本卸载 (推荐)
-如果您是使用 f_v2ray 或官方提供的 install-release.sh 安装的，可以直接运行：
+## 卸载
 
-Bash
-bash <(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh) --remove
 
-2. 手动彻底卸载
-如果您不确定安装方式，可以通过以下步骤手动停止服务并删除文件：
-
-第一步：停止并禁用服务
-
-Bash
-
-systemctl stop xray
-
-systemctl disable xray
-
-第二步：删除二进制文件和配置文件
-
-Bash
-
-# 删除主程序和资源文件
-
-rm -rf /usr/local/bin/xray
-
-rm -rf /usr/local/share/xray
-
-# 删除配置文件目录
-
-rm -rf /usr/local/etc/xray
-
-# 删除日志文件
-
-rm -rf /var/log/xray
-
-第三步：移除 Systemd 服务项
-
-Bash
-
-rm -f /etc/systemd/system/xray.service
+```
+bash <(curl -sL 'https://raw.githubusercontent.com/Yeungchichao/RealityGo/main/RealityGo0.sh')
+```
 
 rm -f /etc/systemd/system/xray@.service
 

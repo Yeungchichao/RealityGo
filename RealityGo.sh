@@ -52,16 +52,18 @@ command -v sing-box >/dev/null 2>&1 || { echo "sing-box 安装失败。" >&2; ex
 
 # Reality 的 SNI 同时作为服务端握手目标；允许从候选列表手动选择，
 # 直接回车则随机选择。SNI_CHOICE=编号 可用于非交互部署。
-# 候选标准（2026-11 实测）：冷门站点 + 非 Cloudflare 托管 + 支持 TLS 1.3 与 ALPN h2。
+# 候选标准（2026-11 真机实测）：冷门站点 + 非 Cloudflare 托管 + TLS 1.3 与 ALPN h2，
+# 且已通过 sing-box 服务端+客户端成对实测（generate_204）——仅过 openssl 静态
+# 检查的站点（如 swinburne/han.nl）实际握手会被对方前端拒绝，故不在此列。
 # 注意：CDN 托管会变，站点可能迁入 Cloudflare 或降级 TLS；脚本在选定后还会再做一次握手校验。
 SNI_OPTIONS=(
   "www.rp.edu.sg" "www.ite.edu.sg" "www.nyp.edu.sg"
   "www.tp.edu.sg" "creative.com" "www.lovelive-anime.jp"
-  "www.han.nl" "www.windesheim.nl" "www.ru.nl"
-  "www.swinburne.edu.au" "www.hs-karlsruhe.de" "www.fom-international.com"
+  "www.ru.nl" "www.hs-karlsruhe.de" "www.fom-international.com"
   "vuejs-jp.org" "zh-hk.vuejs.org" "www.avans.nl"
   "www.utwente.nl" "www.curtin.edu.au" "www.westernsydney.edu.au"
-  "www.dcu.ie" "www.ul.ie"
+  "www.dcu.ie" "www.ul.ie" "www.uea.ac.uk"
+  "www.tohoku.ac.jp" "www.kyushu-u.ac.jp"
 )
 
 SNI_CHOICE="${SNI_CHOICE:-}"

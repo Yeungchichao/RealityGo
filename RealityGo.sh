@@ -52,17 +52,16 @@ command -v sing-box >/dev/null 2>&1 || { echo "sing-box 安装失败。" >&2; ex
 
 # Reality 的 SNI 同时作为服务端握手目标；允许从候选列表手动选择，
 # 直接回车则随机选择。SNI_CHOICE=编号 可用于非交互部署。
+# 候选标准（2026-11 实测）：冷门站点 + 非 Cloudflare 托管 + 支持 TLS 1.3 与 ALPN h2。
+# 注意：CDN 托管会变，站点可能迁入 Cloudflare 或降级 TLS；脚本在选定后还会再做一次握手校验。
 SNI_OPTIONS=(
-  "gateway.icloud.com" "itunes.apple.com" "swdist.apple.com"
-  "swcdn.apple.com" "updates.cdn-apple.com" "mensura.cdn-apple.com"
-  "osxapps.itunes.apple.com" "aod.itunes.apple.com" "learn.microsoft.com"
-  "addons.mozilla.org" "global.fujifilm.com" "m.media-amazon.com"
-  "www.lovelive-anime.jp" "academy.nvidia.com" "www.tesla.com"
-  "www.python.org" "vuejs.org" "vuejs-jp.org" "zh-hk.vuejs.org"
-  "react.dev" "www.java.com" "www.oracle.com" "www.mysql.com"
-  "www.mongodb.com" "redis.io" "www.swift.com" "www.cisco.com"
-  "www.asus.com" "www.samsung.com" "www.amd.com" "www.umcg.nl"
-  "www.fom-international.com" "www.u-can.co.jp" "github.io"
+  "www.rp.edu.sg" "www.ite.edu.sg" "www.nyp.edu.sg"
+  "www.tp.edu.sg" "creative.com" "www.lovelive-anime.jp"
+  "www.han.nl" "www.windesheim.nl" "www.ru.nl"
+  "www.swinburne.edu.au" "www.hs-karlsruhe.de" "www.fom-international.com"
+  "vuejs-jp.org" "zh-hk.vuejs.org" "www.avans.nl"
+  "www.utwente.nl" "www.curtin.edu.au" "www.westernsydney.edu.au"
+  "www.dcu.ie" "www.ul.ie"
 )
 
 SNI_CHOICE="${SNI_CHOICE:-}"
@@ -82,9 +81,12 @@ else
   exit 1
 fi
 TARGET="${SNI_OPTIONS[$SNI_INDEX]}"
-echo "已选择 SNI：${TARGET}；正在检查服务器能否连接其 TLS 1.3 服务……"
-if ! timeout 10 openssl s_client -connect "${TARGET}:443" -servername "$TARGET" -tls1_3 -brief </dev/null >/dev/null 2>&1; then
-  echo "无法与 ${TARGET}:443 完成 TLS 1.3 握手。请重跑并选择其他 SNI 编号。" >&2
+echo "已选择 SNI：${TARGET}；正在检查其 TLS 1.3 与 ALPN h2 支持……"
+# Reality 握手目标必须同时支持 TLS 1.3 与 ALPN h2；只支持 TLS 1.3 的站点
+# （例如无 h2 的直连源站）会导致客户端连接失败，故在此一并校验 h2。
+SNI_PROBE="$(timeout 10 openssl s_client -connect "${TARGET}:443" -servername "$TARGET" -tls1_3 -alpn h2 </dev/null 2>/dev/null || true)"
+if ! grep -q "ALPN protocol: h2" <<<"$SNI_PROBE"; then
+  echo "无法与 ${TARGET}:443 完成 TLS 1.3 + h2 握手。请重跑并选择其他 SNI 编号。" >&2
   exit 1
 fi
 

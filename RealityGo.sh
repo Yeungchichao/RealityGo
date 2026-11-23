@@ -63,7 +63,7 @@ SNI_OPTIONS=(
   "vuejs-jp.org" "zh-hk.vuejs.org" "www.avans.nl"
   "www.utwente.nl" "www.curtin.edu.au" "www.westernsydney.edu.au"
   "www.dcu.ie" "www.ul.ie" "www.uea.ac.uk"
-  "static.cdn.responsys.net" "www.kyushu-u.ac.jp"
+  "fastly.jsdelivr.net" "www.kyushu-u.ac.jp"
 )
 
 SNI_CHOICE="${SNI_CHOICE:-}"

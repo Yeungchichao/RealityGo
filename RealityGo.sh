@@ -59,11 +59,11 @@ command -v sing-box >/dev/null 2>&1 || { echo "sing-box 安装失败。" >&2; ex
 SNI_OPTIONS=(
   "www.rp.edu.sg" "www.ite.edu.sg" "www.nyp.edu.sg"
   "www.tp.edu.sg" "creative.com" "www.lovelive-anime.jp"
-  "www.ru.nl" "www.hs-karlsruhe.de" "www.fom-international.com"
+  "www.ru.nl" "global.fujifilm.com" "www.fom-international.com"
   "vuejs-jp.org" "zh-hk.vuejs.org" "www.avans.nl"
   "www.utwente.nl" "www.curtin.edu.au" "www.westernsydney.edu.au"
   "www.dcu.ie" "www.ul.ie" "www.uea.ac.uk"
-  "www.tohoku.ac.jp" "www.kyushu-u.ac.jp"
+  "static.cdn.responsys.net" "www.kyushu-u.ac.jp"
 )
 
 SNI_CHOICE="${SNI_CHOICE:-}"
